@@ -6,9 +6,9 @@ import numpy as np
 
 def pr_threshold(y_true: np.ndarray, y_prob: np.ndarray, min_precision: float) -> Tuple[float, float]:
     # Сортировка массивов
-    sort_indices = np.argsort(-y_prob)  # Сортировка по убыванию
-    y_true_sorted = y_true[sort_indices]
-    y_prob_sorted = y_prob[sort_indices]
+    # sort_indices = np.argsort(-y_prob)  # Сортировка по убыванию
+    y_true_sorted = y_true#[sort_indices]
+    y_prob_sorted = y_prob#[sort_indices]
 
     # Расчет накопительных сумм
     tp_cumsum = np.cumsum(y_true_sorted)  # True Positives
@@ -26,45 +26,88 @@ def pr_threshold(y_true: np.ndarray, y_prob: np.ndarray, min_precision: float) -
     return y_prob_sorted[best_index], recall[best_index]
 
 
-def binary_search(arr, target, func):
-    low, high = 0, len(arr) - 1
-    best_val = 0
-    while low <= high:
-        mid = (low + high) // 2
-        val = func(arr, mid)
-        if val < target:
-            high = mid - 1
-        else:
-            best_val = mid
-            low = mid + 1
-    return best_val
+# def binary_search(arr, target, func):
+#     low, high = 0, len(arr) - 1
+#     best_val = 0
+#     while low <= high:
+#         mid = (low + high) // 2
+#         val = func(arr, mid)
+#         if val < target:
+#             high = mid - 1
+#         else:
+#             best_val = mid
+#             low = mid + 1
+#     return best_val
 
+
+
+# def sr_threshold(y_true: np.ndarray, y_prob: np.ndarray, min_specificity: float) -> Tuple[float, float]:
+#     # sort_indices = np.argsort(-y_prob)
+#     y_true_sorted = y_true#[sort_indices]
+#     y_prob_sorted = y_prob#[sort_indices]
+
+#     # Предварительные вычисления
+#     tp_cumsum = np.cumsum(y_true_sorted == 1)  # Кумулятивная сумма истинных положительных результатов
+#     total_positive = tp_cumsum[-1]  # Общее количество положительных классов
+
+#     threshold_index = binary_search(y_prob_sorted, min_specificity,
+#                                     lambda arr, idx: specificity_at_threshold(y_true_sorted, arr, idx))
+#     threshold = y_prob_sorted[threshold_index]
+#     recall = tp_cumsum[threshold_index] / total_positive  # Вычисление полноты
+
+#     return threshold, recall
+
+
+
+# def specificity_at_threshold(y_true, y_prob, index):
+#     threshold = y_prob[index]
+#     y_pred = (y_prob >= threshold).astype(int)
+#     tn = np.count_nonzero((y_pred == 0) & (y_true == 0))
+#     fp = np.count_nonzero((y_pred == 1) & (y_true == 0))
+    # return tn / (tn + fp)
 
 def sr_threshold(y_true: np.ndarray, y_prob: np.ndarray, min_specificity: float) -> Tuple[float, float]:
-    sort_indices = np.argsort(-y_prob)
-    y_true_sorted = y_true[sort_indices]
-    y_prob_sorted = y_prob[sort_indices]
+    # Сортировка массивов не требуется, так как y_prob уже отсортирован
+    unique_prob = np.unique(y_prob)  # Уникальные значения вероятности
+    left, right = 0, len(unique_prob) - 1  # Инициализация границ бинарного поиска
 
-    # Предварительные вычисления
-    tp_cumsum = np.cumsum(y_true_sorted == 1)  # Кумулятивная сумма истинных положительных результатов
-    total_positive = tp_cumsum[-1]  # Общее количество положительных классов
+    best_threshold = 0
+    max_recall = 0
 
-    # Вычисление кумулятивных сумм для tn и fp один раз
-    y_pred_sorted = (y_prob_sorted >= y_prob_sorted[0]).astype(int)
-    tn_cumsum = np.cumsum((y_pred_sorted == 0) & (y_true_sorted == 0))
-    fp_cumsum = np.cumsum((y_pred_sorted == 1) & (y_true_sorted == 0))
+    total_positives = np.sum(y_true)  # Общее количество положительных примеров
+    total_negatives = len(y_true) - total_positives  # Общее количество отрицательных примеров
 
-    threshold_index = binary_search(y_prob_sorted, min_specificity, lambda arr, idx: specificity_at_threshold(idx, tn_cumsum, fp_cumsum))
-    threshold = y_prob_sorted[threshold_index]
-    recall = tp_cumsum[threshold_index] / total_positive  # Вычисление полноты
+    while left <= right:
+        mid = (left + right) // 2
+        threshold = unique_prob[mid]
 
-    return threshold, recall
+        # Определение индексов для текущего порога
+        indices = np.where(y_prob >= threshold)[0]
 
+        # Вычисление TN, FP, TP и FN
+        tp = np.sum(y_true[indices])
+        fp = len(indices) - tp
+        tn = total_negatives - fp
+        fn = total_positives - tp
 
-def specificity_at_threshold(index, tn_cumsum, fp_cumsum):
-    tn = tn_cumsum[index]
-    fp = fp_cumsum[index]
-    return tn / (tn + fp)
+        # Вычисление Specificity и Recall
+        specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+
+        # Проверка условия минимальной специфичности
+        if specificity >= min_specificity:
+            # Обновление лучшего порога и максимальной полноты, если необходимо
+            if recall > max_recall:
+                best_threshold = threshold
+                max_recall = recall
+
+            # Перемещение правой границы бинарного поиска
+            right = mid - 1
+        else:
+            # Перемещение левой границы бинарного поиска
+            left = mid + 1
+
+    return best_threshold, max_recall
 
 
 def pr_curve(
