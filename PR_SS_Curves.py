@@ -1,99 +1,147 @@
 from sklearn.metrics import precision_recall_curve, confusion_matrix
-import numpy as np
+from scipy.interpolate import interp1d
 from typing import Tuple
+import numpy as np
+
 
 def pr_threshold(y_true: np.ndarray, y_prob: np.ndarray, min_precision: float) -> Tuple[float, float]:
-    precision, recall, thresholds = precision_recall_curve(y_true, y_prob)
-    thresholds = np.append(thresholds, 1)
+    # Сортировка массивов
+    # sort_indices = np.argsort(-y_prob)  # Сортировка по убыванию
+    y_true_sorted = y_true#[sort_indices]
+    y_prob_sorted = y_prob#[sort_indices]
 
-    index = np.where(precision >= min_precision)[0]
-    max_recall = recall[index].max()
-    threshold_proba = thresholds[index[np.where(recall == max_recall)][0].max()]
+    # Расчет накопительных сумм
+    tp_cumsum = np.cumsum(y_true_sorted)  # True Positives
+    fp_cumsum = np.arange(1, len(y_true) + 1) - tp_cumsum  # False Positives
 
+    # Расчет Precision и Recall
+    precision = tp_cumsum / (tp_cumsum + fp_cumsum)
+    recall = tp_cumsum / np.sum(y_true)
+
+    # Поиск порога, соответствующего минимальной точности
+    valid_indices = np.where(precision >= min_precision)[0]
+    if valid_indices.size == 0:
+        return 0, 0  # Нет подходящего порога
+    best_index = valid_indices[np.argmax(recall[valid_indices])]
+    return y_prob_sorted[best_index], recall[best_index]
+
+def sr_threshold(y_true: np.ndarray,
+                 y_prob: np.ndarray,
+                 min_specificity: float) -> Tuple[float, float]:
+    """Returns threshold and recall (from Specificity-Recall Curve)"""
+    # calculate True Positive as a cumulative amount
+    tp = np.cumsum(y_true)
+    # calculate recall
+    recall = tp / tp[-1]
+    # calculate the cumulative amount of negative class
+    negatives = np.cumsum(y_true == 0)
+    # set left border
+    left = -1
+    # calculate the length of the dataset and right border
+    right = y_true.shape[0]
+    # through the loop compare the specificity
+    while left + 1 < right:
+        # calculate the middle
+        middle = (left + right) // 2
+        # calculate specificity
+        specificity = 1 - negatives[middle] / negatives[-1]
+        # compare the specifics at the middle point
+        if specificity < min_specificity:
+            right = middle
+        elif specificity > min_specificity:
+            left = middle
+        else:
+            left = middle
+            break
+    # override threshold_proba and max_recall
+    threshold_proba = y_prob[left]
+    max_recall = recall[left]
     return threshold_proba, max_recall
 
-def sr_threshold(y_true: np.ndarray, y_prob: np.ndarray, min_specificity: float) -> Tuple[float, float]:
-    threshold_indices = np.argsort(y_prob, kind="mergesort")[::-1]
-    sorted_probs = y_prob[threshold_indices]
-    sorted_true = y_true[threshold_indices]
 
-    recall = []
-    specificity = []
-    for threshold in sorted_probs:
-        predicted = (y_prob >= threshold).astype(int)
-        tn, fp, fn, tp = confusion_matrix(y_true, predicted).ravel()
-        recall.append(tp / (tp + fn))
-        specificity.append(tn / (tn + fp))
+def pr_curve(
+    y_true: np.ndarray,
+    y_prob: np.ndarray,
+    conf: float = 0.95,
+    n_bootstrap: int = 10_000
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
 
-    specificity = np.array(specificity)
-    recall = np.array(recall)
-    index = np.where(specificity >= min_specificity)[0]
-    max_recall = recall[index].max()
-    threshold_proba = sorted_probs[index[np.where(recall == max_recall)][0].max()]
+    # precision, recall, _ = precision_recall_curve(y_true, y_prob)
 
-    return threshold_proba, max_recall
+    # precisions_bootstrap = []
+
+    # positive_indices = np.where(y_true == 1)[0]
+    # negative_indices = np.where(y_true == 0)[0]
+
+    # for _ in range(n_bootstrap):
+    #     positive_bootstrap_indices = np.random.choice(positive_indices, len(positive_indices), replace=True)
+    #     negative_bootstrap_indices = np.random.choice(negative_indices, len(negative_indices), replace=True)
+
+    #     bootstrap_indices = np.concatenate([positive_bootstrap_indices, negative_bootstrap_indices])
+    #     y_true_bootstrap = y_true[bootstrap_indices]
+    #     y_prob_bootstrap = y_prob[bootstrap_indices]
+
+    #     precision_bootstrap, recall_bootstrap, _ = precision_recall_curve(y_true_bootstrap, y_prob_bootstrap)
+    #     interp_func = interp1d(recall_bootstrap, precision_bootstrap, bounds_error=False, fill_value=(1., 0.), assume_sorted=True)
+    #     interpolated_precision = interp_func(recall)
+
+    #     precisions_bootstrap.append(interpolated_precision)
+
+    # precisions_bootstrap = np.array(precisions_bootstrap)
+    # # precision_lcb = np.quantile(precisions_bootstrap, (1 - conf) / 2 * 100, axis=0)
+    # # precision_ucb = np.quantile(precisions_bootstrap, (1 + conf) / 2 * 100, axis=0)
+
+    # precision_lcb = np.quantile(precisions_bootstrap, (1 - conf) / 2, axis=0)
+    # precision_ucb = np.quantile(precisions_bootstrap, (1 + conf) / 2, axis=0)
 
 
-def pr_curve(y_true: np.ndarray, y_prob: np.ndarray, conf: float = 0.95, n_bootstrap: int = 10_000) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    precision, recall, _ = precision_recall_curve(y_true, y_prob)
+    # return recall, precision, precision_lcb, precision_ucb
 
-    precisions_bootstrap = []
 
-    for _ in range(n_bootstrap):
-        indices = np.random.choice(range(len(y_true)), len(y_true), replace=True)
-        y_true_bootstrap = y_true[indices]
-        y_prob_bootstrap = y_prob[indices]
-
-        precision_bootstrap, recall_bootstrap, _ = precision_recall_curve(y_true_bootstrap, y_prob_bootstrap)
-        interpolated_precision = np.interp(recall, recall_bootstrap, precision_bootstrap)
-        precisions_bootstrap.append(interpolated_precision)
-
-    precisions_bootstrap = np.array(precisions_bootstrap)
-    precision_lcb = np.percentile(precisions_bootstrap, (1 - conf) / 2 * 100, axis=0)
-    precision_ucb = np.percentile(precisions_bootstrap, (1 + conf) / 2 * 100, axis=0)
-
-    return recall, precision, precision_lcb, precision_ucb
+    return y_true, y_prob, y_true, y_prob
 
 def sr_curve(y_true: np.ndarray, y_prob: np.ndarray, conf: float = 0.95, n_bootstrap: int = 10_000) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    threshold_indices = np.argsort(y_prob, kind="mergesort")[::-1]
-    sorted_probs = y_prob[threshold_indices]
-    sorted_true = y_true[threshold_indices]
+    # threshold_indices = np.argsort(y_prob, kind="mergesort")[::-1]
+    # sorted_probs = y_prob[threshold_indices]
+    # sorted_true = y_true[threshold_indices]
 
-    recall = []
-    specificity = []
-    for threshold in sorted_probs:
-        predicted = (y_prob >= threshold).astype(int)
-        tn, fp, fn, tp = confusion_matrix(y_true, predicted).ravel()
-        recall.append(tp / (tp + fn))
-        specificity.append(tn / (tn + fp))
+    # recall = []
+    # specificity = []
+    # for threshold in sorted_probs:
+    #     predicted = (y_prob >= threshold).astype(int)
+    #     tn, fp, fn, tp = confusion_matrix(y_true, predicted).ravel()
+    #     recall.append(tp / (tp + fn))
+    #     specificity.append(tn / (tn + fp))
 
-    specificity_bootstrap_list = []
+    # specificity_bootstrap_list = []
 
-    for _ in range(n_bootstrap):
-        indices = np.random.choice(range(len(y_true)), len(y_true), replace=True)
-        y_true_bootstrap = y_true[indices]
-        y_prob_bootstrap = y_prob[indices]
+    # for _ in range(n_bootstrap):
+    #     indices = np.random.choice(range(len(y_true)), len(y_true), replace=True)
+    #     y_true_bootstrap = y_true[indices]
+    #     y_prob_bootstrap = y_prob[indices]
 
-        threshold_indices_bootstrap = np.argsort(y_prob_bootstrap, kind="mergesort")[::-1]
-        sorted_probs_bootstrap = y_prob_bootstrap[threshold_indices_bootstrap]
-        sorted_true_bootstrap = y_true_bootstrap[threshold_indices_bootstrap]
+    #     threshold_indices_bootstrap = np.argsort(y_prob_bootstrap, kind="mergesort")[::-1]
+    #     sorted_probs_bootstrap = y_prob_bootstrap[threshold_indices_bootstrap]
+    #     sorted_true_bootstrap = y_true_bootstrap[threshold_indices_bootstrap]
 
-        recall_bootstrap = []
-        specificity_bootstrap = []
-        for threshold in sorted_probs_bootstrap:
-            predicted = (y_prob_bootstrap >= threshold).astype(int)
-            tn, fp, fn, tp = confusion_matrix(y_true_bootstrap, predicted).ravel()
-            recall_bootstrap.append(tp / (tp + fn))
-            specificity_bootstrap.append(tn / (tn + fp))
+    #     recall_bootstrap = []
+    #     specificity_bootstrap = []
+    #     for threshold in sorted_probs_bootstrap:
+    #         predicted = (y_prob_bootstrap >= threshold).astype(int)
+    #         tn, fp, fn, tp = confusion_matrix(y_true_bootstrap, predicted).ravel()
+    #         recall_bootstrap.append(tp / (tp + fn))
+    #         specificity_bootstrap.append(tn / (tn + fp))
 
-        interpolated_specificity = np.interp(recall, recall_bootstrap, specificity_bootstrap)
-        specificity_bootstrap_list.append(interpolated_specificity)
+    #     interpolated_specificity = np.interp(recall, recall_bootstrap, specificity_bootstrap)
+    #     specificity_bootstrap_list.append(interpolated_specificity)
 
-    specificity_bootstrap_array = np.array(specificity_bootstrap_list)
-    specificity_lcb = np.percentile(specificity_bootstrap_array, (1 - conf) / 2 * 100, axis=0)
-    specificity_ucb = np.percentile(specificity_bootstrap_array, (1 + conf) / 2 * 100, axis=0)
+    # specificity_bootstrap_array = np.array(specificity_bootstrap_list)
+    # specificity_lcb = np.percentile(specificity_bootstrap_array, (1 - conf) / 2 * 100, axis=0)
+    # specificity_ucb = np.percentile(specificity_bootstrap_array, (1 + conf) / 2 * 100, axis=0)
 
-    return np.array(recall), np.array(specificity), specificity_lcb, specificity_ucb
+    # return np.array(recall), np.array(specificity), specificity_lcb, specificity_ucb
+
+    return y_true, y_prob, y_true, y_prob
 
 
 # import numpy as np
