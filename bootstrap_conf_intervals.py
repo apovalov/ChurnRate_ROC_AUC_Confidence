@@ -5,7 +5,10 @@ import numpy as np
 
 def bootstrap_iteration(y_true: np.ndarray, y_probs: np.ndarray):
     n = len(y_true)
-    bootstrap_indices = np.random.choice(np.arange(n), size=n, replace=True)
+    # bootstrap_indices = np.random.choice(np.arange(n), size=n, replace=True)
+    poisson_counts = np.random.poisson(1, n)
+    bootstrap_indices = np.repeat(np.arange(n), poisson_counts)
+
     y_bootstrap = y_true[bootstrap_indices]
     y_probs_bootstrap = y_probs[bootstrap_indices]
 
