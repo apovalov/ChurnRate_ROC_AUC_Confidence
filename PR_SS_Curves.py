@@ -1,6 +1,6 @@
 from sklearn.metrics import precision_recall_curve, confusion_matrix
 from scipy.interpolate import interp1d
-from typing import Tuple
+from typing import Tuple, List
 import numpy as np
 
 
@@ -59,46 +59,48 @@ def sr_threshold(y_true: np.ndarray,
     return threshold_proba, max_recall
 
 
+def bootstrap_pr(y_true: np.ndarray,
+                 y_probs: np.ndarray,
+                 n_bootstrap: int = 10_000) -> Tuple[List[float], List[float]]:
+    all_precisions, all_recalls = [], []
+    for _ in range(n_bootstrap):
+        indices = np.random.choice(len(y_true), size=len(y_true), replace=True)
+        y_true_bootstrap = y_true[indices]
+        y_probs_bootstrap = y_probs[indices]
+
+        # precision, recall, _ = precision_recall_curve(y_true_bootstrap, y_probs_bootstrap)
+        # Расчет накопительных сумм
+        tp_cumsum = np.cumsum(y_true_bootstrap)  # True Positives
+        fp_cumsum = np.arange(1, len(y_true_bootstrap) + 1) - tp_cumsum  # False Positives
+
+        # Расчет Precision и Recall
+        precision = tp_cumsum / (tp_cumsum + fp_cumsum)
+        recall = tp_cumsum / np.sum(y_true_bootstrap)
+
+        all_precisions.append(np.mean(precision))
+        all_recalls.append(np.mean(recall))
+    return all_precisions, all_recalls
+
 def pr_curve(
     y_true: np.ndarray,
-    y_prob: np.ndarray,
+    y_probs: np.ndarray,
     conf: float = 0.95,
     n_bootstrap: int = 10_000
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> Tuple[float, float, float, float]:
+    alpha = (1 - conf) / 2
+    all_precisions, all_recalls = bootstrap_pr(y_true, y_probs, n_bootstrap)
 
-    # precision, recall, _ = precision_recall_curve(y_true, y_prob)
+    mean_precision = np.mean(all_precisions)
+    mean_recall = np.mean(all_recalls)
 
-    # precisions_bootstrap = []
+    # Использование bootstrap для вычисления доверительных интервалов:
+    precision_ci_lower = np.percentile(all_precisions, alpha * 100)
+    precision_ci_upper = np.percentile(all_precisions, (1 - alpha) * 100)
 
-    # positive_indices = np.where(y_true == 1)[0]
-    # negative_indices = np.where(y_true == 0)[0]
-
-    # for _ in range(n_bootstrap):
-    #     positive_bootstrap_indices = np.random.choice(positive_indices, len(positive_indices), replace=True)
-    #     negative_bootstrap_indices = np.random.choice(negative_indices, len(negative_indices), replace=True)
-
-    #     bootstrap_indices = np.concatenate([positive_bootstrap_indices, negative_bootstrap_indices])
-    #     y_true_bootstrap = y_true[bootstrap_indices]
-    #     y_prob_bootstrap = y_prob[bootstrap_indices]
-
-    #     precision_bootstrap, recall_bootstrap, _ = precision_recall_curve(y_true_bootstrap, y_prob_bootstrap)
-    #     interp_func = interp1d(recall_bootstrap, precision_bootstrap, bounds_error=False, fill_value=(1., 0.), assume_sorted=True)
-    #     interpolated_precision = interp_func(recall)
-
-    #     precisions_bootstrap.append(interpolated_precision)
-
-    # precisions_bootstrap = np.array(precisions_bootstrap)
-    # # precision_lcb = np.quantile(precisions_bootstrap, (1 - conf) / 2 * 100, axis=0)
-    # # precision_ucb = np.quantile(precisions_bootstrap, (1 + conf) / 2 * 100, axis=0)
-
-    # precision_lcb = np.quantile(precisions_bootstrap, (1 - conf) / 2, axis=0)
-    # precision_ucb = np.quantile(precisions_bootstrap, (1 + conf) / 2, axis=0)
+    return mean_recall, mean_precision, precision_ci_lower, precision_ci_upper
 
 
-    # return recall, precision, precision_lcb, precision_ucb
 
-
-    return y_true, y_prob, y_true, y_prob
 
 def sr_curve(y_true: np.ndarray, y_prob: np.ndarray, conf: float = 0.95, n_bootstrap: int = 10_000) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     # threshold_indices = np.argsort(y_prob, kind="mergesort")[::-1]
