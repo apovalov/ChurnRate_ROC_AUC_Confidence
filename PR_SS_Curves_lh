@@ -1,0 +1,140 @@
+from typing import Tuple
+import numpy as np
+
+def pr_threshold(y_true: np.ndarray,
+                 y_prob: np.ndarray,
+                 min_precision: float) -> Tuple[float, float]:
+    """Returns threshold and recall (from Precision-Recall Curve)"""
+    # calculate the length of the dataset
+    num = y_true.shape[0]
+    # calculate True Positive as a cumulative amount
+    tp = np.cumsum(y_true)
+    # calculate precision
+    precision = tp / np.arange(1, num+1)
+    # calculate recall
+    recall = tp / tp[-1]
+    # set the first value for threshold_proba
+    threshold_proba = y_prob[0]
+    # set the first value for max_recall
+    max_recall = recall[0]
+    # through the loop compare the remaining values of recall and precision
+    for i in range(1, num):
+        # if presiding more than min_presiding and recall more than max_recall
+        if precision[i] >= min_precision and recall[i] > max_recall:
+            # override max_recall and threshold_proba
+            max_recall = recall[i]
+            threshold_proba = y_prob[i]
+    return threshold_proba, max_recall
+
+def sr_threshold(y_true: np.ndarray,
+                 y_prob: np.ndarray,
+                 min_specificity: float) -> Tuple[float, float]:
+    """Returns threshold and recall (from Specificity-Recall Curve)"""
+    # calculate True Positive as a cumulative amount
+    tp = np.cumsum(y_true)
+    # calculate recall
+    recall = tp / tp[-1]
+    # calculate the cumulative amount of negative class
+    negatives = np.cumsum(y_true == 0)
+    # set left border
+    left = -1
+    # calculate the length of the dataset and right border
+    right = y_true.shape[0]
+    # through the loop compare the specificity
+    while left + 1 < right:
+        # calculate the middle
+        middle = (left + right) // 2
+        # calculate specificity
+        specificity = 1 - negatives[middle] / negatives[-1]
+        # compare the specifics at the middle point
+        if specificity < min_specificity:
+            right = middle
+        elif specificity > min_specificity:
+            left = middle
+        else:
+            left = middle
+            break
+    # override threshold_proba and max_recall
+    threshold_proba = y_prob[left]
+    max_recall = recall[left]
+    return threshold_proba, max_recall
+
+def pr_curve(y_true: np.ndarray,
+             y_prob: np.ndarray,
+             conf: float = 0.95,
+             n_bootstrap: int = 10_000) -> Tuple[np.ndarray,
+                                                 np.ndarray,
+                                                 np.ndarray,
+                                                 np.ndarray]:
+    """Returns Precision-Recall curve and it's (LCB, UCB)"""
+    # calculate the length of the dataset
+    num = y_true.shape[0]
+    # calculate True Positive as a cumulative amount
+    tp = np.cumsum(y_true == 1)
+    # calculate recall and add first value
+    recall = np.insert(tp / tp[-1], 0, 0.0)
+    # create sequence numbers for the dataset
+    serial_number = np.arange(1, num+1)
+    # calculate precision and add first value
+    precision = np.insert(tp / serial_number, 0, 1.0)
+    # create an empty list for precisions
+    precision_cb = []
+    # create a conditional loop
+    while n_bootstrap > 0:
+        # generate indexes of num
+        ind = np.sort(np.random.choice(num, num, replace=True))
+        # if all indexes are the same, then a new iteration of the loop
+        if len(set(y_true[ind])) < 2:
+            continue
+        # calculate True Positive for the sample as a cumulative amount
+        tp_sample = np.cumsum(y_true[ind] == 1)
+        # calculate precision for sample
+        precision_sample = tp_sample / serial_number
+        # calculate interpolated precision and add first value
+        precision_interpolated = np.insert(np.maximum.accumulate(precision_sample[::-1])[::-1], 0, 1.0)
+        # add interpolated precision
+        precision_cb.append(precision_interpolated)
+        n_bootstrap -= 1
+    # calculate confidence interval limits for precision
+    precision_lcb, precision_ucb = np.quantile(precision_cb, [(1 - conf) / 2, (1 + conf) / 2], axis=0)
+    return recall, precision, precision_lcb, precision_ucb
+
+def sr_curve(y_true: np.ndarray,
+             y_prob: np.ndarray,
+             conf: float = 0.95,
+             n_bootstrap: int = 10_000) -> Tuple[np.ndarray,
+                                                 np.ndarray,
+                                                 np.ndarray,
+                                                 np.ndarray]:
+    """Returns Specificity-Recall curve and it's (LCB, UCB)"""
+    # calculate the length of the dataset
+    num = y_true.shape[0]
+    # calculate True Positive as a cumulative amount
+    tp = np.cumsum(y_true == 1)
+    # calculate recall and add first value
+    recall = np.insert(tp / tp[-1], 0, 0.0)
+    # calculate the cumulative amount of negative class
+    negatives = np.cumsum(y_true == 0)
+    # calculate specificity and add first value
+    specificity = np.insert(1 - negatives / negatives[-1], 0, 1.0)
+    # create an empty list for specificity
+    specificity_cb = []
+    # create a conditional loop
+    while n_bootstrap > 0:
+        # generate indexes of num
+        ind = np.sort(np.random.choice(num, num, replace=True))
+        # if all indexes are the same, then a new iteration of the loop
+        if len(set(y_true[ind])) < 2:
+            continue
+        # calculate the cumulative amount of negative class for sample
+        negatives_sample = np.cumsum(y_true[ind] == 0)
+        # calculate specificity for sample
+        specificity_sample = 1 - negatives_sample / negatives_sample[-1]
+        # calculate interpolated specificity and add first value
+        specificity_interpolated = np.insert(np.maximum.accumulate(specificity_sample[::-1])[::-1], 0, 1.0)
+        # add interpolated precision
+        specificity_cb.append(specificity_interpolated)
+        n_bootstrap -= 1
+    # calculate confidence interval limits for specificity
+    specificity_lcb, specificity_ucb = np.quantile(specificity_cb, [(1 - conf) / 2, (1 + conf) / 2], axis=0)
+    return recall, specificity, specificity_lcb, specificity_ucb
