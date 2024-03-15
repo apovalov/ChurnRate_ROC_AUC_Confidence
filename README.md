@@ -1,4 +1,4 @@
-# ChurnRate ROCAUC Confidence
+# ChurnRate ROC-AUC Confidence
 
 Our churn-rate model, [ChurnRate_RFM](https://github.com/apovalov/ChurnRate_RFM), achieves excellent results: ROC-AUC: 93%!
 
