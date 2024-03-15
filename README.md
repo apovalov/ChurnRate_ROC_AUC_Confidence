@@ -1,4 +1,4 @@
-## My ROC-AUC: 93%!
+## Our churn-rate [model]([url](https://github.com/apovalov/ChurnRate_RFM)) make excellent results My ROC-AUC: 93%!
 
 - How confident are you in this estimate? How do you know that in a month the model will not lose quality? Suddenly, in a month, when we calculate the result next time, the ROC-AUC will be 95%, we exhale, and two months later it will be 76%. It will be very frustrating if we don't know what to expect in advance. It's natural that the metric will say up and down - the question for you is: within what limits?
 
